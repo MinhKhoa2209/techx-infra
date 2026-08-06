@@ -1,0 +1,8 @@
+# EKS 1.35 uses AWS-owned default envelope encryption (EKS >=1.28).
+AWS-0039
+# Public endpoint is restricted to the validated single caller /32.
+AWS-0040
+# The public endpoint CIDR is a single dynamically verified caller /32.
+AWS-0041
+# Public subnets are intentional for this no-NAT, short-lived demo.
+AWS-0164

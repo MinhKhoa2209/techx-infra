@@ -1,8 +1,55 @@
 # TechX Infrastructure
 
-Minimal Terraform foundation for the TechX internship demo. AWS resources are
-implemented in Phase 6 and may only be applied after all local gates and
-explicit user approval.
+Minimal Terraform foundation for the TechX internship demo. Configuration and
+offline/read-only preflight are implemented; no AWS mutation is allowed until
+the checksum-bound approval checkpoint.
+
+## Offline and read-only workflow
+
+```powershell
+./scripts/verify.ps1
+./scripts/preflight.ps1
+./scripts/cost-estimate.ps1 -Hours 12
+```
+
+The checks pin Terraform/providers, validate and scan all modules, verify EKS
+1.35/add-on/AZ/quota availability, simulate required IAM permissions, and keep
+the conservative cost upper bound below the 60 USD apply gate. Read-only
+preflight does not create AWS resources.
+
+Create a private, ignored saved plan only when the email and same-day destroy
+deadline are correct:
+
+```powershell
+./scripts/create-reviewed-plan.ps1 `
+  -BudgetAlertEmail 'owner@example.com' `
+  -DestroyDeadline '2026-08-06T18:00:00+07:00' `
+  -MaximumHours 12
+```
+
+The script isolates the Helm repository cache, refreshes the caller `/32`,
+creates `.plans/demo.tfplan`, verifies every managed resource is in scope,
+checks `add/change/destroy`, writes a SHA-256 checksum, and ends at
+`WAITING_FOR_USER_APPROVAL`. The private plan and summary are ignored by Git.
+
+Do not run `terraform apply` directly from configuration. Phase 7 may apply
+only the exact saved plan after the user repeats the confirmation sentence in
+the private approval summary. Any changed account, region, IP, estimate,
+deadline, configuration, or checksum invalidates approval and requires a new
+plan. The budget in the plan sends actual-cost alerts at 40, 60, and 72 USD;
+80 USD remains the hard cap, while alerts are not a real-time hard stop.
+
+## Deliberate security exceptions
+
+- EKS 1.35 uses the default AWS-owned KMS v2 envelope encryption available to
+  EKS 1.28+, avoiding a needless customer-key charge.
+- The EKS public API is enabled only for one validated caller IPv4 `/32`; its
+  private endpoint is also enabled.
+- Two public subnets and one public node IPv4 are intentional in this no-NAT
+  demo so the node can reach EKS add-ons/ECR. No node security group opens
+  direct Internet ingress.
+- VPC CNI NetworkPolicy enforcement is explicitly enabled. Only the temporary
+  frontend Ingress creates an Internet-facing load balancer later in Phase 8.
 
 ## Shared deployment contract
 

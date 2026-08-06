@@ -4,6 +4,9 @@
 *.tfplan
 crash.log
 terraform.tfvars
+.plans/
+.terraform-helm/
+approval-summary.private.txt
+preflight.private.json
 .env
 *.log
-
