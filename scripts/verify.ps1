@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-foreach ($path in @('.gitignore', 'LICENSE', 'README.md')) {
+foreach ($path in @('.gitignore', 'LICENSE', 'README.md', 'scripts/apply-reviewed-plan.ps1')) {
   if (-not (Test-Path -LiteralPath $path)) {
     throw "Missing required bootstrap file: $path"
   }

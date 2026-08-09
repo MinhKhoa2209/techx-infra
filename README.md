@@ -34,10 +34,19 @@ checks `add/change/destroy`, writes a SHA-256 checksum, and ends at
 
 Do not run `terraform apply` directly from configuration. Phase 7 may apply
 only the exact saved plan after the user repeats the confirmation sentence in
-the private approval summary. Any changed account, region, IP, estimate,
-deadline, configuration, or checksum invalidates approval and requires a new
-plan. The budget in the plan sends actual-cost alerts at 40, 60, and 72 USD;
-80 USD remains the hard cap, while alerts are not a real-time hard stop.
+the private approval summary. Apply through the checksum/deadline guard so the
+same isolated Helm repository cache is used during planning and execution:
+
+```powershell
+./scripts/apply-reviewed-plan.ps1 `
+  -ApprovedChecksum '<sha256-from-summary>' `
+  -ApprovedDestroyDeadline '<deadline-from-summary>'
+```
+
+Any changed account, region, IP, estimate, deadline, configuration, or
+checksum invalidates approval and requires a new plan. The budget in the plan
+sends actual-cost alerts at 40, 60, and 72 USD; 80 USD remains the hard cap,
+while alerts are not a real-time hard stop.
 
 ## Deliberate security exceptions
 
