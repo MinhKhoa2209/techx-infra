@@ -48,6 +48,26 @@ checksum invalidates approval and requires a new plan. The budget in the plan
 sends actual-cost alerts at 40, 60, and 72 USD; 80 USD remains the hard cap,
 while alerts are not a real-time hard stop.
 
+## Retained lab lifecycle
+
+After the first reviewed apply, do not destroy and recreate the foundation for
+each test. Suspend it after testing by removing the Argo CD Application and ALB
+before scaling the worker node to zero:
+
+```powershell
+./scripts/suspend-environment.ps1 -RetentionDeadline '2026-08-20T18:00:00+07:00'
+```
+
+Resume it for the next AWS-only test without Terraform apply:
+
+```powershell
+./scripts/resume-environment.ps1
+```
+
+The IDLE state still keeps the EKS control plane and other foundation resources,
+so it still has a cost. Retention is limited to seven days. Run full Terraform
+destroy only for a structural infrastructure change or final project closure.
+
 ## Deliberate security exceptions
 
 - EKS 1.35 uses the default AWS-owned KMS v2 envelope encryption available to

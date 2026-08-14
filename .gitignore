@@ -8,5 +8,6 @@ terraform.tfvars
 .terraform-helm/
 approval-summary.private.txt
 preflight.private.json
+environment-state.private.json
 .env
 *.log
