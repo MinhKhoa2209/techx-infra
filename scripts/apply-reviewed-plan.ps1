@@ -1,13 +1,14 @@
 param(
   [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$ApprovedChecksum,
-  [Parameter(Mandatory)][datetimeoffset]$ApprovedDestroyDeadline
+  [Parameter(Mandatory)][datetimeoffset]$ApprovedDestroyDeadline,
+  [ValidateSet('foundation', 'edge')][string]$Stage = 'foundation'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $demo = Join-Path $root 'environments/demo'
-$planPath = Join-Path $root '.plans/demo.tfplan'
-$summaryPath = Join-Path $root 'approval-summary.private.txt'
+$planPath = Join-Path $root ".plans/demo-$Stage.tfplan"
+$summaryPath = Join-Path $root "approval-summary-$Stage.private.txt"
 $helmHome = Join-Path $root '.terraform-helm'
 
 if (-not (Test-Path -LiteralPath $planPath) -or -not (Test-Path -LiteralPath $summaryPath)) {
@@ -19,6 +20,7 @@ $summaryChecksum = [regex]::Match($summary, 'SHA256:\s*([0-9a-f]{64})').Groups[1
 $summaryAccount = [regex]::Match($summary, 'Account ID:\s*(\d{12})').Groups[1].Value
 $summaryDeadlineText = [regex]::Match($summary, 'Destroy deadline:\s*(.+)').Groups[1].Value.Trim()
 $summaryDeadline = [datetimeoffset]::Parse($summaryDeadlineText)
+$summaryStage = [regex]::Match($summary, 'Stage:\s*(\w+)').Groups[1].Value
 $actualChecksum = (Get-FileHash -LiteralPath $planPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
 if ($ApprovedChecksum -ne $summaryChecksum -or $ApprovedChecksum -ne $actualChecksum) {
@@ -26,6 +28,9 @@ if ($ApprovedChecksum -ne $summaryChecksum -or $ApprovedChecksum -ne $actualChec
 }
 if ($ApprovedDestroyDeadline -ne $summaryDeadline) {
   throw 'Approved destroy deadline does not match the reviewed summary.'
+}
+if ($summaryStage -ne $Stage) {
+  throw 'Requested stage does not match the reviewed summary.'
 }
 if ($summaryDeadline -le [datetimeoffset]::Now) {
   throw 'The approved destroy deadline has expired.'

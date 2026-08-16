@@ -12,6 +12,17 @@ if ($RetentionDeadline -le [datetimeoffset]::Now -or $RetentionDeadline -gt [dat
   throw 'RetentionDeadline must be in the future and no more than seven days away.'
 }
 
+$vpnEndpoints = @(aws ec2 describe-client-vpn-endpoints --region $Region --filters Name=tag:Project,Values=techx --query 'ClientVpnEndpoints[].ClientVpnEndpointId' --output json | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inventory Client VPN endpoints.' }
+$distributions = aws cloudfront list-distributions --output json | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inventory CloudFront distributions.' }
+$domainDistributions = @($distributions.DistributionList.Items | Where-Object { $_.Aliases.Items -contains 'shop.dinhminhkhoa.id.vn' })
+$privateZones = @(aws route53 list-hosted-zones-by-name --dns-name shop.dinhminhkhoa.id.vn --query 'HostedZones[?Config.PrivateZone==`true`].Name' --output json | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to inventory private hosted zones.' }
+if ($vpnEndpoints.Count -gt 0 -or $domainDistributions.Count -gt 0 -or $privateZones -contains 'shop.dinhminhkhoa.id.vn.') {
+  throw 'The domain/VPN profile cannot use baseline IDLE: paid edge resources would remain. Disconnect VPN, remove the public CNAME, then use destroy-domain-vpn-environment.ps1.'
+}
+
 aws eks describe-cluster --region $Region --name $ClusterName --output json | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "EKS cluster $ClusterName is unavailable." }
 aws eks update-kubeconfig --region $Region --name $ClusterName | Out-Null

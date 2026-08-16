@@ -16,4 +16,10 @@ variable "availability_zones" {
   }
 }
 
+variable "create_private_subnets" {
+  type        = bool
+  description = "Create two no-NAT private subnets for the internal ALB and CloudFront VPC origin."
+  default     = false
+}
+
 variable "tags" { type = map(string) }

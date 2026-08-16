@@ -4,11 +4,48 @@ locals {
 }
 
 module "vpc" {
-  source             = "../../modules/vpc"
-  name               = local.name
-  vpc_cidr           = var.vpc_cidr
-  availability_zones = var.availability_zones
-  tags               = local.tags
+  source                 = "../../modules/vpc"
+  name                   = local.name
+  vpc_cidr               = var.vpc_cidr
+  availability_zones     = var.availability_zones
+  create_private_subnets = var.enable_domain_vpn_foundation
+  tags                   = local.tags
+}
+
+data "aws_ec2_managed_prefix_list" "cloudfront_origin" {
+  count = var.enable_domain_vpn_foundation ? 1 : 0
+  name  = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+resource "aws_security_group" "internal_alb" {
+  count = var.enable_domain_vpn_foundation ? 1 : 0
+
+  name_prefix = "${local.name}-internal-alb-"
+  description = "Internal ALB used by CloudFront and AWS Client VPN"
+  vpc_id      = module.vpc.vpc_id
+  tags        = merge(local.tags, { Name = "${local.name}-internal-alb" })
+
+  lifecycle { create_before_destroy = true }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "cloudfront_http" {
+  count = var.enable_domain_vpn_foundation ? 1 : 0
+
+  security_group_id = aws_security_group.internal_alb[0].id
+  description       = "CloudFront origin-facing network to ALB HTTP"
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin[0].id
+}
+
+resource "aws_vpc_security_group_egress_rule" "internal_alb_to_vpc" {
+  count = var.enable_domain_vpn_foundation ? 1 : 0
+
+  security_group_id = aws_security_group.internal_alb[0].id
+  description       = "Internal ALB to Kubernetes targets"
+  ip_protocol       = "-1"
+  cidr_ipv4         = var.vpc_cidr
 }
 
 module "ecr" {
@@ -44,9 +81,67 @@ module "aws_load_balancer_controller" {
 }
 
 module "argocd" {
-  source        = "../../modules/argocd"
-  chart_version = "9.5.17"
-  depends_on    = [module.aws_load_balancer_controller]
+  source                  = "../../modules/argocd"
+  chart_version           = "9.5.17"
+  private_ingress_enabled = var.enable_domain_vpn_foundation
+  server_rootpath         = "/argocd"
+  server_url              = "https://${var.domain_name}/argocd"
+  certificate_arn         = var.public_certificate_arn
+  alb_security_group_id   = var.enable_domain_vpn_foundation ? aws_security_group.internal_alb[0].id : ""
+  private_subnet_ids      = module.vpc.private_subnet_ids
+  ingress_group_name      = "techx-private"
+  depends_on              = [module.aws_load_balancer_controller]
+}
+
+data "aws_lb" "internal" {
+  count = var.enable_domain_vpn_edge ? 1 : 0
+  arn   = var.internal_alb_arn
+}
+
+module "cloudfront" {
+  source = "../../modules/cloudfront"
+
+  enabled            = var.enable_domain_vpn_edge
+  name               = local.name
+  domain_name        = var.domain_name
+  certificate_arn    = var.public_certificate_arn
+  origin_alb_arn     = var.internal_alb_arn
+  origin_domain_name = var.enable_domain_vpn_edge ? data.aws_lb.internal[0].dns_name : ""
+  tags               = local.tags
+}
+
+module "private_dns" {
+  source = "../../modules/private-dns"
+
+  enabled   = var.enable_domain_vpn_edge
+  zone_name = var.domain_name
+  vpc_id    = module.vpc.vpc_id
+  alb_arn   = var.internal_alb_arn
+  tags      = local.tags
+}
+
+module "client_vpn" {
+  source = "../../modules/client-vpn"
+
+  enabled                     = var.enable_domain_vpn_edge
+  name                        = "${local.name}-operator"
+  region                      = var.region
+  vpc_id                      = module.vpc.vpc_id
+  vpc_cidr                    = module.vpc.vpc_cidr
+  subnet_id                   = var.enable_domain_vpn_edge ? module.vpc.private_subnet_ids[0] : ""
+  client_cidr                 = var.client_vpn_cidr
+  server_certificate_arn      = var.client_vpn_server_certificate_arn
+  client_root_certificate_arn = var.client_vpn_root_certificate_arn
+  alb_security_group_id       = var.enable_domain_vpn_edge ? aws_security_group.internal_alb[0].id : ""
+  eks_security_group_id       = module.eks.cluster_security_group_id
+  tags                        = local.tags
+}
+
+check "edge_requires_foundation" {
+  assert {
+    condition     = !var.enable_domain_vpn_edge || var.enable_domain_vpn_foundation
+    error_message = "enable_domain_vpn_edge requires enable_domain_vpn_foundation=true."
+  }
 }
 
 resource "aws_budgets_budget" "project" {

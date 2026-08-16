@@ -69,8 +69,8 @@ variable "node_disk_size_gib" {
 variable "addon_versions" {
   type = map(string)
   default = {
-    vpc-cni    = "v1.22.3-eksbuild.1"
-    kube-proxy = "v1.35.3-eksbuild.17"
+    vpc-cni    = "v1.22.4-eksbuild.3"
+    kube-proxy = "v1.35.3-eksbuild.18"
     coredns    = "v1.13.2-eksbuild.11"
   }
   validation {
@@ -87,5 +87,74 @@ variable "budget_alert_email" {
   validation {
     condition     = var.budget_alert_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.budget_alert_email))
     error_message = "budget_alert_email must be a valid email address."
+  }
+}
+
+variable "enable_domain_vpn_foundation" {
+  type        = bool
+  description = "Create private subnets, internal-ALB security group and Argo CD private ingress."
+  default     = false
+}
+
+variable "enable_domain_vpn_edge" {
+  type        = bool
+  description = "Create CloudFront, private DNS and AWS Client VPN after the internal ALB exists."
+  default     = false
+}
+
+variable "domain_name" {
+  type    = string
+  default = "shop.dinhminhkhoa.id.vn"
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\\.[a-z]{2,}$", var.domain_name))
+    error_message = "domain_name must be a valid lowercase DNS hostname."
+  }
+}
+
+variable "public_certificate_arn" {
+  type      = string
+  default   = ""
+  sensitive = true
+  validation {
+    condition     = var.public_certificate_arn == "" || can(regex("^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$", var.public_certificate_arn))
+    error_message = "public_certificate_arn must be an ACM certificate ARN in us-east-1."
+  }
+}
+
+variable "internal_alb_arn" {
+  type    = string
+  default = ""
+  validation {
+    condition     = var.internal_alb_arn == "" || can(regex("^arn:aws:elasticloadbalancing:us-east-1:[0-9]{12}:loadbalancer/app/", var.internal_alb_arn))
+    error_message = "internal_alb_arn must be an Application Load Balancer ARN in us-east-1."
+  }
+}
+
+variable "client_vpn_cidr" {
+  type    = string
+  default = "172.20.0.0/22"
+  validation {
+    condition     = can(cidrhost(var.client_vpn_cidr, 0)) && !startswith(var.client_vpn_cidr, "10.42.")
+    error_message = "client_vpn_cidr must be valid and must not overlap the TechX VPC."
+  }
+}
+
+variable "client_vpn_server_certificate_arn" {
+  type      = string
+  default   = ""
+  sensitive = true
+  validation {
+    condition     = var.client_vpn_server_certificate_arn == "" || can(regex("^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$", var.client_vpn_server_certificate_arn))
+    error_message = "client_vpn_server_certificate_arn must be an ACM certificate ARN in us-east-1."
+  }
+}
+
+variable "client_vpn_root_certificate_arn" {
+  type      = string
+  default   = ""
+  sensitive = true
+  validation {
+    condition     = var.client_vpn_root_certificate_arn == "" || can(regex("^arn:aws:acm:us-east-1:[0-9]{12}:certificate/[0-9a-f-]+$", var.client_vpn_root_certificate_arn))
+    error_message = "client_vpn_root_certificate_arn must be an ACM certificate ARN in us-east-1."
   }
 }
