@@ -15,7 +15,7 @@ required = [
     'resource "aws_cloudfront_vpc_origin"',
     'resource "aws_ec2_client_vpn_endpoint"',
     'resource "aws_route53_zone"',
-    'Managed-AllViewerExceptHostHeader',
+    'Managed-AllViewerAndCloudFrontHeaders-2022-06',
     'uri === \'/argocd\'',
     'cidrhost(var.vpc_cidr, 2)',
     '"server.rootpath" = var.server_rootpath',

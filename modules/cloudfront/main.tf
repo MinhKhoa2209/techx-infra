@@ -11,7 +11,6 @@ function handler(event) {
       headers: { 'content-type': { value: 'text/plain; charset=utf-8' } }
     };
   }
-  request.headers['x-techx-viewer-ip'] = { value: event.viewer.ip };
   return request;
 }
 EOF
@@ -22,9 +21,9 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
   name  = "Managed-CachingDisabled"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+data "aws_cloudfront_origin_request_policy" "all_viewer_and_cloudfront_headers" {
   count = var.enabled ? 1 : 0
-  name  = "Managed-AllViewerExceptHostHeader"
+  name  = "Managed-AllViewerAndCloudFrontHeaders-2022-06"
 }
 
 data "aws_cloudfront_response_headers_policy" "security_headers" {
@@ -91,7 +90,7 @@ resource "aws_cloudfront_distribution" "this" {
     compress               = true
 
     cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled[0].id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host[0].id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_and_cloudfront_headers[0].id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers[0].id
 
     function_association {

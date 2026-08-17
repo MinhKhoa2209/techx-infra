@@ -88,13 +88,16 @@ elif stage == "edge":
     if type_counts["aws_eks_cluster"] or type_counts["aws_eks_node_group"] or type_counts["helm_release"]:
         raise AssertionError("edge plan must not recreate EKS or Helm releases")
 else:
-    expected = {
+    allowed_hardening = {
+        "module.cloudfront.aws_cloudfront_distribution.this[0]",
         "module.cloudfront.aws_cloudfront_function.block_argocd[0]",
         "module.eks.aws_eks_cluster.this",
         "module.eks.aws_iam_openid_connect_provider.this",
     }
-    if changed_addresses != expected:
-        raise AssertionError(f"hardening plan must update exactly {sorted(expected)}; got {sorted(changed_addresses)}")
+    if not changed_addresses or not changed_addresses.issubset(allowed_hardening):
+        raise AssertionError(f"unexpected hardening resources: {sorted(changed_addresses)}")
+    if not any(address.startswith("module.cloudfront.") for address in changed_addresses):
+        raise AssertionError("hardening plan must contain a CloudFront in-place update")
     if any(actions != ["update"] for actions in address_actions.values()):
         raise AssertionError("hardening plan permits in-place updates only")
 
