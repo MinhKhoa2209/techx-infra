@@ -91,6 +91,7 @@ else:
     expected = {
         "module.cloudfront.aws_cloudfront_function.block_argocd[0]",
         "module.eks.aws_eks_cluster.this",
+        "module.eks.aws_iam_openid_connect_provider.this",
     }
     if changed_addresses != expected:
         raise AssertionError(f"hardening plan must update exactly {sorted(expected)}; got {sorted(changed_addresses)}")

@@ -82,7 +82,7 @@ $requiredActions = if ($Stage -eq 'foundation') {
 } elseif ($Stage -eq 'edge') {
   @('cloudfront:CreateDistribution', 'cloudfront:CreateVpcOrigin', 'ec2:CreateClientVpnEndpoint', 'ec2:AssociateClientVpnTargetNetwork', 'route53:CreateHostedZone', 'route53:ChangeResourceRecordSets')
 } else {
-  @('cloudfront:UpdateFunction', 'cloudfront:PublishFunction', 'eks:UpdateClusterConfig')
+  @('cloudfront:UpdateFunction', 'cloudfront:PublishFunction', 'eks:UpdateClusterConfig', 'iam:UpdateOpenIDConnectProviderThumbprint')
 }
 $simulation = aws iam simulate-principal-policy --policy-source-arn $identity.Arn --action-names $requiredActions --output json | ConvertFrom-Json
 $denied = @($simulation.EvaluationResults | Where-Object { $_.EvalDecision -ne 'allowed' })
