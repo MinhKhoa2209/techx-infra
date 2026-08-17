@@ -1,14 +1,19 @@
 param(
   [string]$Region = 'us-east-1',
   [string]$KubernetesVersion = '1.35',
-  [ValidateSet('foundation', 'edge')][string]$Stage = 'foundation'
+  [ValidateCount(0, 4)][string[]]$PublicAccessCidrs = @(),
+  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation'
 )
 
 $ErrorActionPreference = 'Stop'
+if (@($PublicAccessCidrs | Where-Object { $_ -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}/(24|32)$' }).Count -gt 0) {
+  throw 'PublicAccessCidrs must contain only IPv4 /24 or /32 CIDRs.'
+}
 $identity = aws sts get-caller-identity --output json | ConvertFrom-Json
 if (-not $identity.Account) { throw 'Unable to resolve AWS caller identity.' }
 $ip = (Invoke-RestMethod -Uri 'https://checkip.amazonaws.com').Trim()
 if ($ip -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') { throw 'Unable to resolve caller public IPv4.' }
+$effectivePublicAccessCidrs = if ($PublicAccessCidrs.Count -gt 0) { @($PublicAccessCidrs) } else { @("$ip/32") }
 
 $versions = aws eks describe-cluster-versions --region $Region --no-include-all --output json | ConvertFrom-Json
 $selected = $versions.clusterVersions | Where-Object { $_.clusterVersion -eq $KubernetesVersion -and $_.status -eq 'STANDARD_SUPPORT' }
@@ -32,8 +37,10 @@ foreach ($addon in @('vpc-cni', 'kube-proxy', 'coredns')) {
 $budgets = aws budgets describe-budgets --account-id $identity.Account --output json | ConvertFrom-Json
 
 $conflicts = @()
+$internalAlbArn = ''
 $clusters = @(aws eks list-clusters --region $Region --query 'clusters' --output json | ConvertFrom-Json)
 if ($Stage -eq 'foundation' -and $clusters -contains 'techx-demo') { $conflicts += 'EKS cluster techx-demo' }
+if ($Stage -eq 'recovery' -and $clusters -notcontains 'techx-demo') { throw 'Recovery stage requires the partially created techx-demo foundation.' }
 if ($Stage -eq 'edge' -and $clusters -notcontains 'techx-demo') { throw 'Edge stage requires the techx-demo foundation.' }
 $repositories = @(aws ecr describe-repositories --region $Region --query 'repositories[].repositoryName' --output json | ConvertFrom-Json)
 foreach ($name in @('techx/frontend', 'techx/catalog', 'techx/order')) {
@@ -56,11 +63,14 @@ if ($Stage -eq 'edge') {
   if ($domainDistributions.Count -gt 0) { $conflicts += 'CloudFront alias shop.dinhminhkhoa.id.vn' }
   $internalAlbs = @(aws elbv2 describe-load-balancers --region $Region --query 'LoadBalancers[?Scheme==`internal`].LoadBalancerArn' --output json | ConvertFrom-Json)
   if ($internalAlbs.Count -ne 1) { throw "Edge stage requires exactly one internal ALB; found $($internalAlbs.Count)." }
+  $internalAlbArn = $internalAlbs[0]
 }
 if ($conflicts.Count -gt 0) { throw "Pre-existing resource name conflicts found: $($conflicts -join ', ')" }
 
 $requiredActions = if ($Stage -eq 'foundation') {
   @('eks:CreateCluster', 'eks:DeleteCluster', 'ec2:CreateVpc', 'ec2:RunInstances', 'iam:CreateRole', 'iam:CreatePolicy', 'ecr:CreateRepository', 'budgets:ModifyBudget', 'elasticloadbalancing:CreateLoadBalancer')
+} elseif ($Stage -eq 'recovery') {
+  @('eks:UpdateClusterConfig', 'elasticloadbalancing:CreateLoadBalancer')
 } else {
   @('cloudfront:CreateDistribution', 'cloudfront:CreateVpcOrigin', 'ec2:CreateClientVpnEndpoint', 'ec2:AssociateClientVpnTargetNetwork', 'route53:CreateHostedZone', 'route53:ChangeResourceRecordSets')
 }
@@ -70,7 +80,7 @@ if ($denied.Count -gt 0) { throw "Permission simulation did not allow: $($denied
 
 [pscustomobject]@{
   accountId = $identity.Account; callerArn = $identity.Arn; region = $Region; stage = $Stage
-  callerPublicCidr = "$ip/32"; kubernetesVersion = $selected.clusterVersion
+  callerPublicIp = $ip; callerPublicCidrs = $effectivePublicAccessCidrs; kubernetesVersion = $selected.clusterVersion
   kubernetesStatus = $selected.status; standardSupportEnds = $selected.endOfStandardSupportDate
   availableZones = @($zones.AvailabilityZones.ZoneName); t3MediumZones = @($offerings.InstanceTypeOfferings.Location)
   eksClusterQuota = $clusterQuota.Quota.Value; standardOnDemandVcpuQuota = $vcpuQuota.Quota.Value
@@ -78,4 +88,5 @@ if ($denied.Count -gt 0) { throw "Permission simulation did not allow: $($denied
   existingBudgets = @($budgets.Budgets | ForEach-Object { @{ name = $_.BudgetName; amount = $_.BudgetLimit.Amount; unit = $_.BudgetLimit.Unit } })
   permissionSimulation = @($simulation.EvaluationResults | ForEach-Object { @{ action = $_.EvalActionName; decision = $_.EvalDecision } })
   resourceNameConflicts = $conflicts
+  internalAlbArn = $internalAlbArn
 } | ConvertTo-Json -Depth 6

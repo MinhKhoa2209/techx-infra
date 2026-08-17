@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$ApprovedChecksum,
   [Parameter(Mandatory)][datetimeoffset]$ApprovedDestroyDeadline,
-  [ValidateSet('foundation', 'edge')][string]$Stage = 'foundation'
+  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,7 +53,8 @@ try {
   helm repo update eks argo | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh the isolated Helm repository cache.' }
 
-  terraform "-chdir=$demo" apply -input=false -no-color $planPath
+  $applyLog = Join-Path $root "apply-$Stage.private.log"
+  terraform "-chdir=$demo" apply -input=false -no-color $planPath 2>&1 | Tee-Object -LiteralPath $applyLog
   if ($LASTEXITCODE -ne 0) { throw 'Reviewed Terraform apply failed.' }
 }
 finally {

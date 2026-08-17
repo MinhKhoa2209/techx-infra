@@ -86,6 +86,7 @@ module "argocd" {
   private_ingress_enabled = var.enable_domain_vpn_foundation
   server_rootpath         = "/argocd"
   server_url              = "https://${var.domain_name}/argocd"
+  hostname                = var.domain_name
   certificate_arn         = var.public_certificate_arn
   alb_security_group_id   = var.enable_domain_vpn_foundation ? aws_security_group.internal_alb[0].id : ""
   private_subnet_ids      = module.vpc.private_subnet_ids

@@ -4,7 +4,8 @@ $ErrorActionPreference = 'Stop'
 # AWS-0039: EKS >=1.28 has no-cost default envelope encryption with an AWS-owned
 # key. A customer-managed KMS key would add cost without improving this demo.
 # AWS-0040: the EKS public endpoint is required for the operator and is restricted
-# by validation to one caller /32; the private endpoint remains enabled.
+# by validation to one caller /32, except for up to four explicit reviewed recovery ranges;
+# the private endpoint remains enabled.
 # AWS-0164: public subnets/public node IPv4 are intentional because this no-NAT
 # design must reach EKS add-ons and ECR while avoiding NAT Gateway cost.
 $root = Split-Path -Parent $PSScriptRoot

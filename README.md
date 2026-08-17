@@ -40,6 +40,12 @@ After Plan A is applied and the shared internal ALB ARN is copied into the
 private variable file, create Plan B with `-Stage edge`. Plan B is independently
 reviewed and creates only CloudFront, private Route 53, and Client VPN resources.
 
+If a partially created foundation cannot reach the EKS API because CGNAT
+rotates across known egress ranges, create a reviewed `recovery` stage with
+`-PublicAccessCidrs`. Only that stage can enable up to four temporary `/24` or
+`/32` ranges. A reviewed edge migration may preserve those exact temporary
+ranges until Client VPN acceptance; a later hardening plan removes them.
+
 Do not run `terraform apply` directly from configuration. Phase 7 may apply
 only the exact saved plan after the user repeats the confirmation sentence in
 the private approval summary. Apply through the checksum/deadline guard so the
@@ -146,8 +152,10 @@ Terraform variables, saved plans, and approval summaries remain Git-ignored.
 
 - EKS 1.35 uses the default AWS-owned KMS v2 envelope encryption available to
   EKS 1.28+, avoiding a needless customer-key charge.
-- The EKS public API is enabled only for one validated caller IPv4 `/32`; its
-  private endpoint is also enabled.
+- The EKS public API is normally enabled only for one validated caller IPv4
+  `/32`; its private endpoint is also enabled. A reviewed recovery plan may
+  temporarily use up to four reviewed ranges for rotating CGNAT and must return to `/32` or
+  private-only access after VPN acceptance.
 - Two public subnets and one public node IPv4 are intentional in this no-NAT
   demo so the node can reach EKS add-ons/ECR. Two private subnets host only the
   internal ALB and one Client VPN association. No node security group opens

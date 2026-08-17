@@ -32,7 +32,7 @@ resource "helm_release" "this" {
         enabled          = var.private_ingress_enabled
         controller       = "generic"
         ingressClassName = "alb"
-        hostname         = ""
+        hostname         = var.hostname
         path             = var.server_rootpath
         pathType         = "Prefix"
         tls              = false
@@ -73,11 +73,12 @@ resource "helm_release" "this" {
     precondition {
       condition = !var.private_ingress_enabled || (
         var.server_url != "" &&
+        var.hostname != "" &&
         var.certificate_arn != "" &&
         var.alb_security_group_id != "" &&
         length(var.private_subnet_ids) == 2
       )
-      error_message = "Argo CD private ingress requires URL, certificate, ALB security group and two private subnets."
+      error_message = "Argo CD private ingress requires URL, hostname, certificate, ALB security group and two private subnets."
     }
   }
 }

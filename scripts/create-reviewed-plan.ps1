@@ -2,11 +2,15 @@ param(
   [Parameter(Mandatory)][string]$BudgetAlertEmail,
   [Parameter(Mandatory)][datetimeoffset]$DestroyDeadline,
   [ValidateRange(1, 24)][int]$MaximumHours = 12,
-  [ValidateSet('foundation', 'edge')][string]$Stage = 'foundation',
+  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation',
+  [ValidateCount(0, 4)][string[]]$PublicAccessCidrs = @(),
   [string]$PrivateVarFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
+if (@($PublicAccessCidrs | Where-Object { $_ -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}/(24|32)$' }).Count -gt 0) {
+  throw 'PublicAccessCidrs must contain only IPv4 /24 or /32 CIDRs.'
+}
 $now = [datetimeoffset]::Now
 if ($DestroyDeadline -le $now -or $DestroyDeadline -gt $now.AddHours(24)) {
   throw 'DestroyDeadline must be in the future and no more than 24 hours away.'
@@ -23,13 +27,14 @@ if (-not (Test-Path -LiteralPath $privateVars)) {
 }
 New-Item -ItemType Directory -Force -Path $planDirectory, (Join-Path $helmHome 'repository') | Out-Null
 
-$preflight = & (Join-Path $PSScriptRoot 'preflight.ps1') -Stage $Stage | ConvertFrom-Json
+$preflight = & (Join-Path $PSScriptRoot 'preflight.ps1') -Stage $Stage -PublicAccessCidrs $PublicAccessCidrs | ConvertFrom-Json
 $cost = & (Join-Path $PSScriptRoot 'cost-estimate.ps1') -Hours $MaximumHours -Profile domainVpn | ConvertFrom-Json
 if ($cost.upperBoundUsd -gt 60) { throw 'Cost gate failed.' }
 
 $env:HELM_REPOSITORY_CONFIG = Join-Path $helmHome 'repositories.yaml'
 $env:HELM_REPOSITORY_CACHE = Join-Path $helmHome 'repository'
-$env:TF_VAR_public_access_cidrs = ConvertTo-Json @($preflight.callerPublicCidr) -Compress
+$publicAccessCidrs = ConvertTo-Json @($preflight.callerPublicCidrs) -Compress
+$temporaryCidrEnabled = @($preflight.callerPublicCidrs | Where-Object { $_ -notlike '*/32' }).Count -gt 0 -or @($preflight.callerPublicCidrs).Count -gt 1
 $env:TF_VAR_budget_alert_email = $BudgetAlertEmail
 
 try {
@@ -40,16 +45,26 @@ try {
   terraform "-chdir=$demo" init -backend=false | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'terraform init failed.' }
   $planArgs = @(
-    '-input=false', '-refresh=false', '-no-color', "-out=$planPath",
+    '-input=false', '-no-color', "-out=$planPath",
     "-var-file=$privateVars",
+    "-var=public_access_cidrs=$publicAccessCidrs",
+    "-var=allow_temporary_public_access_cidr=$($temporaryCidrEnabled ? 'true' : 'false')",
     '-var=enable_domain_vpn_foundation=true',
     "-var=enable_domain_vpn_edge=$($Stage -eq 'edge' ? 'true' : 'false')"
   )
+  if ($Stage -eq 'edge') { $planArgs += "-var=internal_alb_arn=$($preflight.internalAlbArn)" }
+  if ($Stage -ne 'recovery') { $planArgs += '-refresh=false' }
   terraform "-chdir=$demo" plan @planArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'terraform plan failed.' }
 
   $review = terraform "-chdir=$demo" show -json $planPath | python (Join-Path $PSScriptRoot 'review-plan.py') $Stage | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) { throw 'Saved-plan review failed.' }
+  $planned = terraform "-chdir=$demo" show -json $planPath | ConvertFrom-Json
+  $plannedCidrs = @($planned.variables.public_access_cidrs.value)
+  $expectedCidrs = @($preflight.callerPublicCidrs)
+  if ($plannedCidrs.Count -ne $expectedCidrs.Count -or (Compare-Object $plannedCidrs $expectedCidrs)) {
+    throw "Saved plan EKS API CIDR does not match preflight: $($plannedCidrs -join ', ')."
+  }
   $hash = (Get-FileHash -LiteralPath $planPath -Algorithm SHA256).Hash.ToLowerInvariant()
 
   $summary = @"
@@ -58,10 +73,10 @@ Stage: $Stage
 Account ID: $($preflight.accountId)
 Caller: $($preflight.callerArn)
 Region: $($preflight.region)
-EKS API CIDR: $($preflight.callerPublicCidr)
+EKS API CIDRs: $($expectedCidrs -join ', ')
 Saved plan: .plans/demo-$Stage.tfplan
 SHA256: $hash
-Resources: $($review.resourceCount) add, 0 change, 0 destroy
+Resources: $($review.actions.create ?? 0) add, $($review.actions.update ?? 0) change, 0 destroy
 Estimated upper bound: $($cost.upperBoundUsd) USD for <= $MaximumHours hours
 Apply gate: 60 USD; hard cap: 80 USD
 Budget alerts in plan: 40, 60, 72 USD
@@ -75,5 +90,5 @@ Tôi xác nhận apply AWS plan này, ngân sách tối đa 80 USD và destroy t
   Write-Output $summary
 }
 finally {
-  Remove-Item Env:TF_VAR_public_access_cidrs, Env:TF_VAR_budget_alert_email, Env:HELM_REPOSITORY_CONFIG, Env:HELM_REPOSITORY_CACHE -ErrorAction SilentlyContinue
+  Remove-Item Env:TF_VAR_budget_alert_email, Env:HELM_REPOSITORY_CONFIG, Env:HELM_REPOSITORY_CACHE -ErrorAction SilentlyContinue
 }

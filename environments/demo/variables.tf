@@ -34,9 +34,30 @@ variable "availability_zones" {
 variable "public_access_cidrs" {
   type = list(string)
   validation {
-    condition     = length(var.public_access_cidrs) == 1 && can(cidrhost(var.public_access_cidrs[0], 0)) && endswith(var.public_access_cidrs[0], "/32") && var.public_access_cidrs[0] != "0.0.0.0/32"
-    error_message = "Set exactly one non-zero public IPv4 /32 for EKS API access."
+    condition = (
+      !var.allow_temporary_public_access_cidr &&
+      length(var.public_access_cidrs) == 1 &&
+      can(cidrhost(var.public_access_cidrs[0], 0)) &&
+      endswith(var.public_access_cidrs[0], "/32") &&
+      var.public_access_cidrs[0] != "0.0.0.0/32"
+      ) || (
+      var.allow_temporary_public_access_cidr &&
+      length(var.public_access_cidrs) >= 1 &&
+      length(var.public_access_cidrs) <= 4 &&
+      alltrue([for cidr in var.public_access_cidrs :
+        can(cidrhost(cidr, 0)) &&
+        (endswith(cidr, "/24") || endswith(cidr, "/32")) &&
+        cidr != "0.0.0.0/24" && cidr != "0.0.0.0/32"
+      ])
+    )
+    error_message = "Set one non-zero public IPv4 /32, or explicitly enable up to four temporary recovery CIDRs."
   }
+}
+
+variable "allow_temporary_public_access_cidr" {
+  type        = bool
+  default     = false
+  description = "Allows up to four temporary /24 or /32 CIDRs only for the reviewed recovery stage."
 }
 
 variable "kubernetes_version" {

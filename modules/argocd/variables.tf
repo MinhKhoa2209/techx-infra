@@ -15,6 +15,11 @@ variable "server_url" {
   default = ""
 }
 
+variable "hostname" {
+  type    = string
+  default = ""
+}
+
 variable "certificate_arn" {
   type      = string
   default   = ""

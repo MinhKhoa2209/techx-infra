@@ -5,8 +5,8 @@ import json
 import sys
 
 stage = sys.argv[1] if len(sys.argv) > 1 else "foundation"
-if stage not in {"foundation", "edge"}:
-    raise AssertionError("stage must be foundation or edge")
+if stage not in {"foundation", "recovery", "edge"}:
+    raise AssertionError("stage must be foundation, recovery, or edge")
 
 plan = json.load(sys.stdin)
 changes = plan.get("resource_changes", [])
@@ -25,17 +25,26 @@ allowed = {
 }
 action_counts: collections.Counter[str] = collections.Counter()
 type_counts: collections.Counter[str] = collections.Counter()
+changed_addresses: set[str] = set()
+address_actions: dict[str, list[str]] = {}
 managed_count = 0
 for change in changes:
     if change.get("mode") == "data":
         continue
-    managed_count += 1
     actions = change["change"]["actions"]
+    if actions == ["no-op"]:
+        continue
+    managed_count += 1
     action_counts.update(actions)
     type_counts.update([change["type"]])
+    changed_addresses.add(change["address"])
+    address_actions[change["address"]] = actions
     if change["type"] not in allowed:
         raise AssertionError(f"out-of-scope resource type: {change['type']}")
-    if actions != ["create"]:
+    allowed_actions = [["create"]]
+    if stage == "recovery":
+        allowed_actions.append(["update"])
+    if actions not in allowed_actions:
         raise AssertionError(f"unexpected actions for {change['address']}: {actions}")
 
 if stage == "foundation":
@@ -49,6 +58,19 @@ if stage == "foundation":
         "aws_cloudfront_distribution", "aws_ec2_client_vpn_endpoint", "aws_route53_zone"
     )):
         raise AssertionError("foundation plan must not create edge/VPN resources")
+elif stage == "recovery":
+    expected = {
+        "module.argocd.helm_release.this",
+        "module.aws_load_balancer_controller.helm_release.this",
+        "module.eks.aws_eks_cluster.this",
+        "module.eks.aws_iam_openid_connect_provider.this",
+    }
+    if not changed_addresses.issubset(expected):
+        raise AssertionError(f"unexpected recovery resources: {sorted(changed_addresses)}")
+    if address_actions.get("module.argocd.helm_release.this") not in (["create"], ["update"]):
+        raise AssertionError("recovery plan must create or update the Argo CD release")
+    if "module.eks.aws_eks_cluster.this" in address_actions and address_actions["module.eks.aws_eks_cluster.this"] != ["update"]:
+        raise AssertionError("recovery EKS endpoint change must be an in-place update")
 else:
     required_edge = {
         "aws_cloudfront_distribution": 1,
