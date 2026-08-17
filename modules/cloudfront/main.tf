@@ -11,6 +11,7 @@ function handler(event) {
       headers: { 'content-type': { value: 'text/plain; charset=utf-8' } }
     };
   }
+  request.headers['x-techx-viewer-ip'] = { value: event.viewer.ip };
   return request;
 }
 EOF
