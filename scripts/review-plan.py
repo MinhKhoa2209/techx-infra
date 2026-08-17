@@ -5,8 +5,8 @@ import json
 import sys
 
 stage = sys.argv[1] if len(sys.argv) > 1 else "foundation"
-if stage not in {"foundation", "recovery", "edge"}:
-    raise AssertionError("stage must be foundation, recovery, or edge")
+if stage not in {"foundation", "recovery", "edge", "hardening"}:
+    raise AssertionError("stage must be foundation, recovery, edge, or hardening")
 
 plan = json.load(sys.stdin)
 changes = plan.get("resource_changes", [])
@@ -42,7 +42,7 @@ for change in changes:
     if change["type"] not in allowed:
         raise AssertionError(f"out-of-scope resource type: {change['type']}")
     allowed_actions = [["create"]]
-    if stage == "recovery":
+    if stage in {"recovery", "hardening"}:
         allowed_actions.append(["update"])
     if actions not in allowed_actions:
         raise AssertionError(f"unexpected actions for {change['address']}: {actions}")
@@ -71,7 +71,7 @@ elif stage == "recovery":
         raise AssertionError("recovery plan must create or update the Argo CD release")
     if "module.eks.aws_eks_cluster.this" in address_actions and address_actions["module.eks.aws_eks_cluster.this"] != ["update"]:
         raise AssertionError("recovery EKS endpoint change must be an in-place update")
-else:
+elif stage == "edge":
     required_edge = {
         "aws_cloudfront_distribution": 1,
         "aws_cloudfront_function": 1,
@@ -87,5 +87,14 @@ else:
             raise AssertionError(f"edge plan requires {expected} {resource_type}")
     if type_counts["aws_eks_cluster"] or type_counts["aws_eks_node_group"] or type_counts["helm_release"]:
         raise AssertionError("edge plan must not recreate EKS or Helm releases")
+else:
+    expected = {
+        "module.cloudfront.aws_cloudfront_function.block_argocd[0]",
+        "module.eks.aws_eks_cluster.this",
+    }
+    if changed_addresses != expected:
+        raise AssertionError(f"hardening plan must update exactly {sorted(expected)}; got {sorted(changed_addresses)}")
+    if any(actions != ["update"] for actions in address_actions.values()):
+        raise AssertionError("hardening plan permits in-place updates only")
 
 print(json.dumps({"stage": stage, "actions": dict(action_counts), "resourceCount": managed_count, "resourceTypes": dict(sorted(type_counts.items()))}, indent=2))

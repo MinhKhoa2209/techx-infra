@@ -2,7 +2,7 @@ param(
   [string]$Region = 'us-east-1',
   [string]$KubernetesVersion = '1.35',
   [ValidateCount(0, 4)][string[]]$PublicAccessCidrs = @(),
-  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation'
+  [ValidateSet('foundation', 'recovery', 'edge', 'hardening')][string]$Stage = 'foundation'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +42,7 @@ $clusters = @(aws eks list-clusters --region $Region --query 'clusters' --output
 if ($Stage -eq 'foundation' -and $clusters -contains 'techx-demo') { $conflicts += 'EKS cluster techx-demo' }
 if ($Stage -eq 'recovery' -and $clusters -notcontains 'techx-demo') { throw 'Recovery stage requires the partially created techx-demo foundation.' }
 if ($Stage -eq 'edge' -and $clusters -notcontains 'techx-demo') { throw 'Edge stage requires the techx-demo foundation.' }
+if ($Stage -eq 'hardening' -and $clusters -notcontains 'techx-demo') { throw 'Hardening stage requires the deployed techx-demo environment.' }
 $repositories = @(aws ecr describe-repositories --region $Region --query 'repositories[].repositoryName' --output json | ConvertFrom-Json)
 foreach ($name in @('techx/frontend', 'techx/catalog', 'techx/order')) {
   if ($Stage -eq 'foundation' -and $repositories -contains $name) { $conflicts += "ECR repository $name" }
@@ -53,14 +54,21 @@ foreach ($name in @('techx-demo-cluster', 'techx-demo-node', 'techx-demo-aws-loa
 $logGroups = @(aws logs describe-log-groups --region $Region --log-group-name-prefix '/aws/eks/techx-demo/cluster' --query 'logGroups[].logGroupName' --output json | ConvertFrom-Json)
 if ($Stage -eq 'foundation' -and $logGroups -contains '/aws/eks/techx-demo/cluster') { $conflicts += 'CloudWatch log group /aws/eks/techx-demo/cluster' }
 if ($Stage -eq 'foundation' -and @($budgets.Budgets.BudgetName) -contains 'techx-demo-hard-cap') { $conflicts += 'AWS Budget techx-demo-hard-cap' }
-if ($Stage -eq 'edge') {
+if ($Stage -in @('edge', 'hardening')) {
   $clientVpn = @(aws ec2 describe-client-vpn-endpoints --region $Region --query 'ClientVpnEndpoints[].ClientVpnEndpointId' --output json | ConvertFrom-Json)
   $privateZones = @(aws route53 list-hosted-zones --query 'HostedZones[?Config.PrivateZone==`true`].Name' --output json | ConvertFrom-Json)
   $distributions = aws cloudfront list-distributions --output json | ConvertFrom-Json
   $domainDistributions = @($distributions.DistributionList.Items | Where-Object { $_.Aliases.Items -contains 'shop.dinhminhkhoa.id.vn' })
-  if ($clientVpn.Count -gt 0) { $conflicts += 'Existing AWS Client VPN endpoint' }
-  if ($privateZones -contains 'shop.dinhminhkhoa.id.vn.') { $conflicts += 'Private hosted zone shop.dinhminhkhoa.id.vn' }
-  if ($domainDistributions.Count -gt 0) { $conflicts += 'CloudFront alias shop.dinhminhkhoa.id.vn' }
+  if ($Stage -eq 'edge') {
+    if ($clientVpn.Count -gt 0) { $conflicts += 'Existing AWS Client VPN endpoint' }
+    if ($privateZones -contains 'shop.dinhminhkhoa.id.vn.') { $conflicts += 'Private hosted zone shop.dinhminhkhoa.id.vn' }
+    if ($domainDistributions.Count -gt 0) { $conflicts += 'CloudFront alias shop.dinhminhkhoa.id.vn' }
+  }
+  else {
+    if ($clientVpn.Count -ne 1) { throw "Hardening stage requires one Client VPN endpoint; found $($clientVpn.Count)." }
+    if (@($privateZones | Where-Object { $_ -eq 'shop.dinhminhkhoa.id.vn.' }).Count -ne 1) { throw 'Hardening stage requires the private hosted zone.' }
+    if ($domainDistributions.Count -ne 1) { throw "Hardening stage requires one domain CloudFront distribution; found $($domainDistributions.Count)." }
+  }
   $internalAlbs = @(aws elbv2 describe-load-balancers --region $Region --query 'LoadBalancers[?Scheme==`internal`].LoadBalancerArn' --output json | ConvertFrom-Json)
   if ($internalAlbs.Count -ne 1) { throw "Edge stage requires exactly one internal ALB; found $($internalAlbs.Count)." }
   $internalAlbArn = $internalAlbs[0]
@@ -71,8 +79,10 @@ $requiredActions = if ($Stage -eq 'foundation') {
   @('eks:CreateCluster', 'eks:DeleteCluster', 'ec2:CreateVpc', 'ec2:RunInstances', 'iam:CreateRole', 'iam:CreatePolicy', 'ecr:CreateRepository', 'budgets:ModifyBudget', 'elasticloadbalancing:CreateLoadBalancer')
 } elseif ($Stage -eq 'recovery') {
   @('eks:UpdateClusterConfig', 'elasticloadbalancing:CreateLoadBalancer')
-} else {
+} elseif ($Stage -eq 'edge') {
   @('cloudfront:CreateDistribution', 'cloudfront:CreateVpcOrigin', 'ec2:CreateClientVpnEndpoint', 'ec2:AssociateClientVpnTargetNetwork', 'route53:CreateHostedZone', 'route53:ChangeResourceRecordSets')
+} else {
+  @('cloudfront:UpdateFunction', 'cloudfront:PublishFunction', 'eks:UpdateClusterConfig')
 }
 $simulation = aws iam simulate-principal-policy --policy-source-arn $identity.Arn --action-names $requiredActions --output json | ConvertFrom-Json
 $denied = @($simulation.EvaluationResults | Where-Object { $_.EvalDecision -ne 'allowed' })

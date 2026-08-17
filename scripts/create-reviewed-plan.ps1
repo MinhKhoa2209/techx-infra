@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory)][string]$BudgetAlertEmail,
   [Parameter(Mandatory)][datetimeoffset]$DestroyDeadline,
   [ValidateRange(1, 24)][int]$MaximumHours = 12,
-  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation',
+  [ValidateSet('foundation', 'recovery', 'edge', 'hardening')][string]$Stage = 'foundation',
   [ValidateCount(0, 4)][string[]]$PublicAccessCidrs = @(),
   [string]$PrivateVarFile = ''
 )
@@ -50,10 +50,10 @@ try {
     "-var=public_access_cidrs=$publicAccessCidrs",
     "-var=allow_temporary_public_access_cidr=$($temporaryCidrEnabled ? 'true' : 'false')",
     '-var=enable_domain_vpn_foundation=true',
-    "-var=enable_domain_vpn_edge=$($Stage -eq 'edge' ? 'true' : 'false')"
+    "-var=enable_domain_vpn_edge=$($Stage -in @('edge', 'hardening') ? 'true' : 'false')"
   )
-  if ($Stage -eq 'edge') { $planArgs += "-var=internal_alb_arn=$($preflight.internalAlbArn)" }
-  if ($Stage -ne 'recovery') { $planArgs += '-refresh=false' }
+  if ($Stage -in @('edge', 'hardening')) { $planArgs += "-var=internal_alb_arn=$($preflight.internalAlbArn)" }
+  if ($Stage -in @('foundation', 'edge')) { $planArgs += '-refresh=false' }
   terraform "-chdir=$demo" plan @planArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'terraform plan failed.' }
 

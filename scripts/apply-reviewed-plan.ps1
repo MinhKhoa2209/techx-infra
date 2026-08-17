@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$ApprovedChecksum,
   [Parameter(Mandatory)][datetimeoffset]$ApprovedDestroyDeadline,
-  [ValidateSet('foundation', 'recovery', 'edge')][string]$Stage = 'foundation'
+  [ValidateSet('foundation', 'recovery', 'edge', 'hardening')][string]$Stage = 'foundation'
 )
 
 $ErrorActionPreference = 'Stop'
